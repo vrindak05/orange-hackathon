@@ -1,0 +1,1863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Live Network Visualization with Animated Routing</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        /* === Global Layout & Background === */
+body {
+  margin: 0;
+  height: 100vh;
+  background: linear-gradient(135deg, #0f172a, #1e293b); /* deep navy gradient */
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  display: flex;
+  color: #e5e7eb;
+}
+
+/* === Graph & Table Containers === */
+#graph-container {
+  flex: 3;
+  height: 100vh;
+}
+
+#graph {
+  width: 100%;
+  height: 100%;
+}
+
+#table-container {
+  flex: 1;
+  background: rgba(30, 41, 59, 0.95); /* semi-transparent dark blue */
+  padding: 20px;
+  overflow-y: auto;
+  border-left: 2px solid #3b82f6; /* blue accent */
+  min-width: 500px;
+  backdrop-filter: blur(8px); /* frosted glass effect */
+}
+/* Enhanced table row background colors */
+tr.low-bg { 
+    background: rgba(16, 185, 129, 0.15); /* subtle green */
+    border-left: 3px solid #10b981;
+}
+
+tr.moderate-bg { 
+    background: rgba(245, 158, 11, 0.15); /* subtle orange */
+    border-left: 3px solid #f59e0b;
+}
+
+tr.high-bg { 
+    background: rgba(239, 68, 68, 0.15); /* subtle red */
+    border-left: 3px solid #ef4444;
+}
+
+/* Path residual glow effect */
+.residual-path {
+    stroke: #60a5fa !important;
+    stroke-opacity: 0.4 !important;
+    stroke-width: 3px !important;
+    filter: drop-shadow(0 0 4px rgba(96,165,250,0.6));
+}
+
+/* Congested path highlighting */
+.congested-path {
+    stroke: #ef4444 !important;
+    stroke-opacity: 0.9 !important;
+    stroke-width: 4px !important;
+    filter: drop-shadow(0 0 8px rgba(239,68,68,0.8));
+    animation: congestion-pulse 2s infinite;
+}
+
+@keyframes congestion-pulse {
+    0%, 100% { stroke-opacity: 0.9; }
+    50% { stroke-opacity: 0.6; }
+}
+
+/* Add these new classes to your existing CSS */
+.unused-path {
+    stroke: #ef4444 !important;
+    stroke-opacity: 0.8 !important;
+    stroke-width: 4px !important;
+    filter: drop-shadow(0 0 6px rgba(239,68,68,0.7));
+    animation: unused-pulse 2s infinite;
+}
+
+.active-packet-path {
+    stroke: #10b981 !important;
+    stroke-opacity: 1 !important;
+    stroke-width: 6px !important;
+    filter: drop-shadow(0 0 8px rgba(16,185,129,0.9));
+}
+
+@keyframes unused-pulse {
+    0%, 100% { stroke-opacity: 0.8; }
+    50% { stroke-opacity: 0.5; }
+}
+
+/* Enhanced table row backgrounds */
+tr.low-bg { 
+    background: rgba(16, 185, 129, 0.15);
+    border-left: 3px solid #10b981;
+}
+tr.moderate-bg { 
+    background: rgba(245, 158, 11, 0.15);
+    border-left: 3px solid #f59e0b;
+}
+tr.high-bg { 
+    background: rgba(239, 68, 68, 0.15);
+    border-left: 3px solid #ef4444;
+}
+#table-container h2 {
+  margin-top: 0;
+  color: #60a5fa;
+  font-weight: 600;
+  text-shadow: 0 0 8px rgba(96,165,250,0.5);
+}
+
+/* === Table Styling === */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+th {
+  padding: 10px;
+  border-bottom: 1px solid #374151;
+  background: linear-gradient(90deg, #2563eb, #1d4ed8);
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+td {
+  padding: 10px;
+  border-bottom: 1px solid #374151;
+  transition: background 0.2s;
+}
+
+td:hover {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+/* === Panel Base === */
+.panel {
+  background: linear-gradient(145deg, #1e293b, #111827);
+  padding: 15px;
+  border-radius: 12px;
+  margin-top: 20px;
+  border: 1px solid #3b82f6;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.panel:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.3);
+}
+
+.panel h3 {
+  margin-top: 0;
+  color: #ffffff; /* changed to white */
+  border-bottom: 1px solid #4b5563;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.panel p {
+  font-size: 0.9em;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* === Router Stats (Shared Across Panels) === */
+.router-stats {
+  margin: 10px 0;
+  padding: 12px 16px;
+  background: rgba(30, 58, 138, 0.8);
+  border-radius: 10px;
+  border: 1px solid #60a5fa;
+  box-shadow: inset 0 0 6px rgba(96, 165, 250, 0.3);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+
+.router-stats:hover {
+  transform: scale(1.02);
+  background: #0c306a;
+}
+
+.router-stats h4 {
+  margin: 6px 0;
+  color: #93c5fd; /* lighter blue */
+  font-size: 1rem;
+  font-weight: 600;
+  border-bottom: 1px solid #2563eb;
+  padding-bottom: 4px;
+}
+
+/* === Interactive Tags === */
+strong.user-tag {
+  color: #a78bfa;
+  display: block;
+  margin-bottom: 5px;
+  font-size: 1.1em;
+  text-shadow: 0 0 6px rgba(167,139,250,0.4);
+}
+
+/* === Status Colors (consistent globally) === */
+.low { color: #10b981; font-weight: bold; }     /* green */
+.moderate { color: #f59e0b; font-weight: bold; } /* orange */
+.high { color: #ef4444; font-weight: bold; }     /* red */
+
+/* === Rerouting Suggestions === */
+#rerouting-suggestions-container p {
+  margin-top: 0;
+  margin-bottom: 15px;
+  padding-left: 10px;
+  border-left: 2px solid #3b82f6;
+}
+
+/* === Graph Node Styling === */
+.node {
+  cursor: grab;
+  transition: fill 0.3s ease, stroke 0.3s ease;
+}
+
+.node:active { cursor: grabbing; }
+
+.node:hover {
+  stroke: #0c306a;
+  stroke-width: 3px;
+  filter: drop-shadow(0 0 6px rgba(59,130,246,0.6));
+}
+
+.link {
+  stroke: #475569;
+  stroke-opacity: 0.6;
+  transition: stroke 0.3s ease, stroke-opacity 0.3s ease, filter 0.3s ease;
+}
+
+.link:hover {
+  stroke: #0c306a;
+  stroke-opacity: 0.9;
+  filter: drop-shadow(0 0 6px rgba(59,130,246,0.6));
+}
+
+/* === Node Labels === */
+.node-text {
+  font-size: 11px;
+  text-anchor: middle;
+  fill: #f1f5f9;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* === Packets === */
+.packet {
+  stroke: #ffffff;
+  stroke-width: 1.5px;
+}
+
+.packet-before { fill: #fca5a5; } /* reddish */
+.packet-after { fill: #86efac; }  /* greenish */
+
+    </style>
+</head>
+<body>
+    <div id="graph-container">
+        <svg id="graph"></svg>
+    </div>
+
+    <div id="table-container">
+        <h2 id="time-step-header">⏱️ Time step -</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Router</th>
+                    <th>Congestion %</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr id="rowA"><td>RouterA</td><td class="val">-</td><td class="status">-</td></tr>
+                <tr id="rowB"><td>RouterB</td><td class="val">-</td><td class="status">-</td></tr>
+                <tr id="rowC"><td>RouterC</td><td class="val">-</td><td class="status">-</td></tr>
+            </tbody>
+        </table>
+
+        <div id="summary-panel" class="panel">
+            <h3>📝 Network Summary</h3>
+            <p id="summary-text">Initializing...</p>
+        </div>
+
+        <div id="rerouting-suggestions-container" class="panel">
+            <h3>📌 Rerouting Suggestions</h3>
+        </div>
+        
+        <div id="bandwidth-adjustment-container" class="panel">
+            <h3>📡 Bandwidth Adjustments</h3>
+        </div>
+<div id="aqm-container" class="panel">
+  <h3>🎛️ AQM Decisions</h3>
+  <table>
+    <thead>
+      <tr><th>Router</th><th>Load</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      <tr id="aqmRowA"><td>A</td><td>-</td><td>-</td></tr>
+      <tr id="aqmRowB"><td>B</td><td>-</td><td>-</td></tr>
+      <tr id="aqmRowC"><td>C</td><td>-</td><td>-</td></tr>
+    </tbody>
+  </table>
+</div>
+ <div id="congestionPanel" class="panel">
+  <h3>🚦 Congestion Control (End-to-End)</h3>
+  <p><strong>Time:</strong> <span id="ccTime">0</span></p>
+  <p><strong>Worst Router:</strong> <span id="ccRouter">-</span></p>
+  <p><strong>Load:</strong> <span id="ccLoad">-</span>%</p>
+  <p><strong>Status:</strong> <span id="ccStatus">-</span></p>
+  <h4>User Rates & Actions</h4>
+  <ul id="ccUsers"></ul>
+</div>
+<div id="bufferPanel" class="panel">
+  <h3>📦 Buffer Management</h3>
+  <p><strong>Time:</strong> <span id="bmTime">0</span></p>
+  <div class="router-stats">
+    <h4>Router A</h4>
+    <p>Load: <span id="bmALoad">-</span>% | Buffer: <span id="bmABuffer">-</span></p>
+    <p><em id="bmAAction">-</em></p>
+  </div>
+  <div class="router-stats">
+    <h4>Router B</h4>
+    <p>Load: <span id="bmBLoad">-</span>% | Buffer: <span id="bmBBuffer">-</span></p>
+    <p><em id="bmBAction">-</em></p>
+  </div>
+  <div class="router-stats">
+    <h4>Router C</h4>
+    <p>Load: <span id="bmCLoad">-</span>% | Buffer: <span id="bmCBuffer">-</span></p>
+    <p><em id="bmCAction">-</em></p>
+  </div>
+</div>
+<div id="leakyBucketPanel" class="panel">
+  <h3>🪣 Leaky Bucket Management</h3>
+  <p><strong>Time:</strong> <span id="lbTime">0</span></p>
+  <div class="router-stats">
+    <h4>Router A</h4>
+    <p>Load: <span id="lbALoad">-</span>% | Arrivals: <span id="lbAArr">-</span> | Leaked: <span id="lbALeak">-</span> | Bucket: <span id="lbABucket">-</span></p>
+    <p><em id="lbAAction">-</em> | Dropped: <span id="lbADrop">-</span></p>
+  </div>
+  <div class="router-stats">
+    <h4>Router B</h4>
+    <p>Load: <span id="lbBLoad">-</span>% | Arrivals: <span id="lbBArr">-</span> | Leaked: <span id="lbBLeak">-</span> | Bucket: <span id="lbBBucket">-</span></p>
+    <p><em id="lbBAction">-</em> | Dropped: <span id="lbBDrop">-</span></p>
+  </div>
+  <div class="router-stats">
+    <h4>Router C</h4>
+    <p>Load: <span id="lbCLoad">-</span>% | Arrivals: <span id="lbCArr">-</span> | Leaked: <span id="lbCLeak">-</span> | Bucket: <span id="lbCBucket">-</span></p>
+    <p><em id="lbCAction">-</em> | Dropped: <span id="lbCDrop">-</span></p>
+  </div>
+</div>
+<div id="tokenBucketPanel" class="panel">
+  <h3>🎟️ Token Bucket Management</h3>
+  <p><strong>Time:</strong> <span id="tbTime">0</span></p>
+
+  <div class="router-stats">
+    <h4>Router A</h4>
+    <p>Load: <span id="tbALoad">-</span> | Demand: <span id="tbADemand">-</span> | Tokens Left: <span id="tbATokens">-</span></p>
+    <p><em id="tbAAction">-</em> | Dropped: <span id="tbADrop">-</span></p>
+  </div>
+
+  <div class="router-stats">
+    <h4>Router B</h4>
+    <p>Load: <span id="tbBLoad">-</span> | Demand: <span id="tbBDemand">-</span> | Tokens Left: <span id="tbBTokens">-</span></p>
+    <p><em id="tbBAction">-</em> | Dropped: <span id="tbBDrop">-</span></p>
+  </div>
+
+  <div class="router-stats">
+    <h4>Router C</h4>
+    <p>Load: <span id="tbCLoad">-</span> | Demand: <span id="tbCDemand">-</span> | Tokens Left: <span id="tbCTokens">-</span></p>
+    <p><em id="tbCAction">-</em> | Dropped: <span id="tbCDrop">-</span></p>
+  </div>
+</div>
+
+        <div class="panel">
+            <h3>📊 Network Statistics</h3>
+            <p>
+                <strong>Total Nodes:</strong> <span id="node-count">-</span><br>
+                <strong>Total Links:</strong> <span id="link-count">-</span><br>
+                <strong>Average Link Weight:</strong> <span id="avg-weight">-</span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA DEFINITIONS ---
+        const csvData = `Source,Target,Weight\nUser1,Switch1,110\nSwitch1,Switch9,80\nSwitch9,Switch2,120\nSwitch2,Switch8,130\nSwitch8,RouterA,90\nRouterA,Server,180\nUser1,Switch8,140\nSwitch8,Switch9,180\nSwitch9,Switch8,190\nSwitch8,Switch10,180\nSwitch8,Switch4,140\nSwitch10,User2,110\nSwitch10,Switch11,130\nSwitch11,Switch4,80\nSwitch4,RouterB,100\nRouterB,Server,120\nSwitch11,Switch12,60\nSwitch12,User3,160\nSwitch12,Switch14,100\nSwitch14,RouterC,130\nRouterC,Server,180\nSwitch11,Switch8,60\nSwitch14,Switch13,120\nSwitch13,User4,80\nSwitch13,Switch6,190\nSwitch6,Switch14,70\nSwitch14,RouterC,70`;
+        const congestionCsv = `Time,RouterA,RouterB,RouterC
+0,1,29,30
+10,3,27,68
+20,35,38,90
+30,97,66,3
+40,45,94,9
+50,2,16,31
+60,36,9,62
+70,23,34,29
+80,22,95,83
+90,56,92,13
+100,99,1,30
+110,71,28,73
+120,30,26,32
+130,96,65,65
+140,21,38,35
+150,56,51,30
+160,93,12,11
+170,10,85,53
+180,98,43,46
+190,84,8,97
+200,2,39,0
+210,48,11,31
+220,67,71,30
+230,19,58,97
+240,85,77,52
+250,97,90,88
+260,71,91,10
+270,61,79,92
+280,75,15,41
+290,45,28,98
+300,45,68,66
+310,67,96,79
+320,62,35,14
+330,34,10,70
+340,36,58,77
+350,45,53,78
+360,46,46,20
+370,26,40,73
+380,87,60,95
+390,94,72,7
+400,1,5,33
+410,46,66,40
+420,77,98,11
+430,4,99,100
+440,31,76,77
+450,18,98,73
+460,9,55,38
+470,10,17,60
+480,0,16,89
+490,73,54,18
+500,28,13,66
+510,48,19,43
+520,36,66,93
+530,3,59,62
+540,39,17,18
+550,67,4,69
+560,0,98,94
+570,26,12,6
+580,66,94,38
+590,62,15,19
+600,82,72,43
+610,43,88,59
+620,7,96,38
+630,3,43,38
+640,74,98,26
+650,83,6,70
+660,13,59,77
+670,6,18,4
+680,44,93,63
+690,3,76,64
+700,49,7,78
+710,48,100,25
+720,38,38,65
+730,46,70,85
+740,3,43,88
+750,2,46,99
+760,52,2,12
+770,32,14,14
+780,74,27,82
+790,25,97,83
+800,91,73,88
+810,14,24,46
+820,72,92,7
+830,21,15,4
+840,52,6,98
+850,95,34,79
+860,65,48,30
+870,7,50,50
+880,75,11,76
+890,76,38,75
+900,42,22,96
+910,48,34,66
+920,22,78,77
+930,14,97,98
+940,3,47,31
+950,84,1,34
+960,95,27,28
+970,0,44,81
+980,44,87,14
+990,60,1,89
+1000,43,43,80
+1010,13,18,88
+1020,18,44,82
+1030,25,92,84
+1040,50,74,71
+1050,41,32,13
+1060,70,16,47
+1070,10,21,31
+1080,14,45,72
+1090,50,96,40
+1100,23,77,54
+1110,14,40,25
+1120,76,46,0
+1130,28,40,60
+1140,12,44,71
+1150,68,61,91
+1160,98,65,94
+1170,63,92,70
+1180,35,65,37
+1190,73,25,43
+1200,76,9,57
+1210,74,7,60
+1220,40,54,22
+1230,59,98,70
+1240,18,69,25
+1250,36,5,50
+1260,68,48,44
+1270,70,64,6
+1280,38,91,94
+1290,99,48,48
+1300,0,40,40
+1310,28,18,74
+1320,89,96,24
+1330,89,29,28
+1340,40,0,5
+1350,74,7,64
+1360,68,63,45
+1370,95,26,21
+1380,81,91,39
+1390,99,20,92
+1400,42,72,8
+1410,16,20,93
+1420,78,82,91
+1430,89,30,29
+1440,73,84,88
+1450,20,33,71
+1460,82,43,77
+1470,9,7,29
+1480,74,44,14
+1490,79,39,43
+1500,60,75,18
+1510,92,30,62
+1520,57,49,87
+1530,61,3,7
+1540,1,77,25
+1550,99,90,99
+1560,57,98,80
+1570,93,17,16
+1580,85,41,6
+1590,83,96,68
+1600,41,48,87
+1610,81,96,19
+1620,52,47,58
+1630,47,7,39
+1640,31,38,2
+1650,51,24,85
+1660,34,14,27
+1670,64,45,94
+1680,37,4,86
+1690,13,15,32
+1700,1,88,88
+1710,78,31,22
+1720,87,14,70
+1730,25,50,82
+1740,73,52,46
+1750,67,77,44
+1760,83,96,30
+1770,39,61,48
+1780,40,10,95
+1790,94,83,94
+1800,24,58,63
+1810,89,59,10
+1820,24,69,30
+1830,70,71,29
+1840,83,7,42
+1850,53,26,21
+1860,85,95,70
+1870,56,57,91
+1880,12,1,53
+1890,46,75,14
+1900,35,93,84
+1910,59,57,91
+1920,15,42,32
+1930,78,57,13
+1940,44,63,77
+1950,28,92,75
+1960,65,78,40
+1970,96,70,79
+1980,52,31,71
+1990,46,4,12
+2000,40,67,16
+2010,52,32,66
+2020,72,79,51
+2030,11,77,7
+2040,36,15,50
+2050,46,77,86
+2060,6,64,32
+2070,30,98,100
+2080,74,28,71
+2090,64,47,82
+2100,56,97,36
+2110,52,24,11
+2120,95,14,3
+2130,56,100,70
+2140,29,90,4
+2150,48,10,49
+2160,6,15,14
+2170,22,78,94
+2180,19,92,96
+2190,69,31,65
+2200,34,35,44
+2210,5,89,51
+2220,59,74,97
+2230,73,56,61
+2240,52,52,73
+2250,44,89,40
+2260,64,71,74
+2270,47,90,46
+2280,70,53,12
+2290,35,81,25
+2300,72,28,98
+2310,44,22,0
+2320,36,62,70
+2330,83,82,51
+2340,70,6,6
+2350,25,97,50
+2360,28,44,27
+2370,92,71,80
+2380,11,69,45
+2390,67,22,10
+2400,88,45,14
+2410,40,20,3
+2420,96,36,58
+2430,61,41,61
+2440,28,31,78
+2450,93,84,85
+2460,77,88,46
+2470,35,80,19
+2480,1,66,45
+2490,50,85,97
+2500,29,61,55
+2510,31,41,21
+2520,54,97,39
+2530,49,27,15
+2540,60,94,23
+2550,18,10,55
+2560,7,12,1
+2570,17,23,41
+2580,29,57,44
+2590,35,86,78
+2600,100,15,10
+2610,19,10,36
+2620,29,99,51
+2630,2,67,64
+2640,1,20,32
+2650,53,47,7
+2660,27,45,61
+2670,55,28,17
+2680,34,53,13
+2690,14,33,67
+2700,63,49,94
+2710,53,66,70
+2720,55,95,21
+2730,64,69,99
+2740,17,89,10
+2750,88,73,55
+2760,38,14,8
+2770,2,96,50
+2780,88,15,52
+2790,48,70,11
+2800,5,75,13
+2810,45,98,11
+2820,31,73,6
+2830,37,56,11
+2840,71,31,75
+2850,30,31,32
+2860,19,16,25
+2870,62,71,87
+2880,93,28,83
+2890,99,64,39
+2900,12,32,89
+2910,3,9,76
+2920,76,4,63
+2930,90,14,63
+2940,26,85,66
+2950,52,46,94
+2960,84,44,42
+2970,96,80,0
+2980,72,88,63
+2990,93,68,95
+3000,25,0,48
+3010,79,98,52
+3020,32,61,3
+3030,50,53,36
+3040,41,58,65
+3050,41,94,8
+3060,9,36,64
+3070,90,67,72
+3080,56,49,85
+3090,85,37,3
+3100,20,36,84
+3110,90,87,87
+3120,88,47,37
+3130,36,0,61
+3140,64,62,17
+3150,52,31,72
+3160,11,6,31
+3170,40,20,53
+3180,25,18,68
+3190,26,28,37
+3200,47,33,41
+3210,1,90,23
+3220,19,50,65
+3230,90,96,54
+3240,5,74,0
+3250,68,53,55
+3260,93,26,57
+3270,2,13,35
+3280,6,72,87
+3290,3,64,24
+3300,44,82,38
+3310,53,53,0
+3320,39,19,74
+3330,1,82,58
+3340,77,21,6
+3350,6,95,92
+3360,38,40,66
+3370,52,80,20
+3380,51,85,68
+3390,27,52,37
+3400,85,47,31
+3410,69,19,37
+3420,66,18,51
+3430,54,34,81
+3440,38,10,97
+3450,96,49,97
+3460,3,76,88
+3470,2,58,60
+3480,73,25,1
+3490,49,36,88
+3500,82,51,84
+3510,45,86,4
+3520,14,4,50
+3530,10,60,89
+3540,86,88,93
+3550,33,25,39
+3560,22,26,5
+3570,52,93,40
+3580,92,63,52
+3590,10,39,90
+3600,1,86,49
+3610,48,55,28
+3620,47,64,2
+3630,5,77,20
+3640,85,18,47
+3650,73,31,79
+3660,37,68,19
+3670,29,63,86
+3680,92,47,27
+3690,20,14,9
+3700,45,93,32
+3710,99,69,99
+3720,37,24,91
+3730,64,10,9
+3740,1,92,51
+3750,82,36,72
+3760,23,51,77
+3770,28,92,83
+3780,71,73,18
+3790,68,31,50
+3800,95,16,95
+3810,98,89,99
+3820,16,44,87
+3830,85,93,4
+3840,4,86,71
+3850,57,94,96
+3860,19,66,74
+3870,92,27,45
+3880,63,52,13
+3890,33,15,75
+3900,18,12,0
+3910,88,69,8
+3920,48,89,39
+3930,97,96,38
+3940,28,44,66
+3950,100,4,12
+3960,73,8,65
+3970,25,50,43
+3980,86,66,9
+3990,70,26,83
+4000,47,69,76
+4010,71,82,92
+4020,50,44,49
+4030,4,15,92
+4040,9,77,94
+4050,86,63,36
+4060,23,94,12
+4070,53,75,30
+4080,1,25,39
+4090,86,96,18
+4100,91,19,27
+4110,3,77,88
+4120,20,14,14
+4130,4,72,90
+4140,8,62,46
+4150,14,84,70
+4160,8,81,99
+4170,73,21,62
+4180,83,74,40
+4190,93,24,97
+4200,84,32,15
+4210,33,70,60
+4220,64,10,91
+4230,92,16,28
+4240,49,34,7
+4250,24,38,67
+4260,12,39,39
+4270,87,17,64
+4280,31,91,41
+4290,5,43,31
+4300,11,16,31
+4310,73,13,2
+4320,89,38,8
+4330,74,53,76
+4340,71,80,95
+4350,91,96,0
+4360,80,15,52
+4370,30,71,4
+4380,4,37,79
+4390,89,32,90
+4400,86,5,69
+4410,41,27,38
+4420,33,87,41
+4430,40,26,89
+4440,10,49,49
+4450,46,45,92
+4460,80,0,33
+4470,68,94,1
+4480,42,22,97
+4490,78,100,54
+4500,44,97,12
+4510,70,48,1
+4520,61,22,10
+4530,32,44,33
+4540,98,27,23
+4550,93,10,94
+4560,62,100,82
+4570,87,9,24
+4580,60,74,18
+4590,0,31,19
+4600,30,0,94
+4610,83,21,1
+4620,9,47,25
+4630,54,46,82
+4640,11,29,91
+4650,41,82,95
+4660,68,100,14
+4670,38,55,44
+4680,98,3,11
+4690,12,48,53
+4700,14,72,29
+4710,7,33,35
+4720,75,81,44
+4730,61,59,72
+4740,27,74,65
+4750,66,38,34
+4760,87,48,28
+4770,24,100,47
+4780,64,75,36
+4790,52,38,11
+4800,18,66,79
+4810,58,10,39
+4820,68,21,45
+4830,75,88,42
+4840,96,28,42
+4850,55,12,23
+4860,22,27,50
+4870,91,61,85
+4880,100,34,13
+4890,71,40,92
+4900,41,46,38
+4910,59,83,52
+4920,59,71,95
+4930,64,26,48
+4940,83,63,31
+4950,67,59,90
+4960,60,65,90
+4970,43,75,17
+4980,88,17,51
+4990,40,1,43
+5000,90,30,8
+5010,17,6,53
+5020,85,80,48
+5030,80,67,58
+5040,97,59,0
+5050,47,60,39
+5060,38,52,84
+5070,10,23,52
+5080,84,54,33
+5090,30,27,22
+5100,7,28,84
+5110,56,67,70
+5120,68,8,78
+5130,78,47,73
+5140,26,12,40
+5150,21,42,29
+5160,11,82,90
+5170,7,48,81
+5180,16,58,16
+5190,35,13,25
+5200,45,49,51
+5210,25,56,66
+5220,83,100,2
+5230,91,76,80
+5240,26,19,88
+5250,24,29,55
+5260,26,79,6
+5270,21,23,50
+5280,40,43,88
+5290,20,59,1
+5300,81,16,8
+5310,36,45,5
+5320,1,34,96
+5330,66,27,69
+5340,80,61,30
+5350,41,71,68
+5360,12,63,89
+5370,85,71,58
+5380,59,66,82
+5390,81,8,96
+5400,56,90,56
+5410,27,68,85
+5420,17,56,59
+5430,64,96,30
+5440,21,83,0
+5450,34,2,82
+5460,43,11,79
+5470,8,25,47
+5480,46,55,27
+5490,61,44,74
+5500,4,46,6
+5510,40,58,95
+5520,2,66,91
+5530,48,74,64
+5540,8,91,10
+5550,73,48,10
+5560,87,75,45
+5570,88,92,7
+5580,31,25,39
+5590,78,47,12
+5600,8,76,93
+5610,6,0,67
+5620,94,63,85
+5630,98,58,23
+5640,45,52,31
+5650,0,80,63
+5660,96,23,31
+5670,74,89,93
+5680,54,87,56
+5690,11,69,33
+5700,77,9,81
+5710,42,68,63
+5720,53,74,83
+5730,70,31,15
+5740,6,7,74
+5750,29,47,72
+5760,28,65,46
+5770,88,80,100
+5780,94,70,13
+5790,83,9,58
+5800,47,59,15
+5810,9,19,87
+5820,16,82,97
+5830,28,18,62
+5840,90,36,38
+5850,65,26,53
+5860,43,31,72
+5870,89,11,44
+5880,4,68,56
+5890,11,68,79
+5900,40,58,80
+5910,64,48,58
+5920,47,45,88
+5930,66,78,93
+5940,20,1,37
+5950,83,66,23
+5960,75,42,49
+5970,4,48,4
+5980,36,82,31
+5990,26,29,98
+6000,30,14,87
+6010,55,1,14
+6020,60,29,72
+6030,78,54,82
+6040,75,71,46
+6050,87,28,30
+6060,20,78,74
+6070,93,93,2
+6080,98,21,71
+6090,9,13,16
+6100,4,61,89
+6110,10,1,67
+6120,30,67,15
+6130,19,58,70
+6140,76,88,92
+6150,25,81,28
+6160,82,94,90
+6170,96,8,23
+6180,35,36,1
+6190,41,37,0
+6200,21,100,33
+6210,56,67,55
+6220,0,72,89
+6230,78,35,62
+6240,49,21,32
+6250,32,87,65
+6260,46,64,71
+6270,84,28,42
+6280,68,97,96
+6290,57,54,82
+6300,57,58,57
+6310,0,59,29
+6320,33,77,37
+6330,53,73,92
+6340,73,69,53
+6350,84,37,62
+6360,79,60,41
+6370,63,42,52
+6380,30,87,29
+6390,41,75,2
+6400,86,43,28
+6410,27,87,84
+6420,26,40,60
+6430,87,46,98
+6440,21,62,99
+6450,21,88,58
+6460,5,46,94
+6470,7,96,34
+6480,20,71,8
+6490,50,15,76
+6500,27,54,16
+6510,9,68,68
+6520,28,78,83
+6530,61,53,33
+6540,34,66,90
+6550,88,6,45
+6560,35,61,74
+6570,82,25,35
+6580,13,3,30
+6590,63,2,2
+6600,91,16,17
+6610,68,22,90
+6620,38,87,20
+6630,28,26,91
+6640,4,18,55
+6650,71,23,91
+6660,42,51,96
+6670,62,54,65
+6680,76,50,9
+6690,15,2,61
+6700,67,80,91
+6710,23,89,85
+6720,72,58,53
+6730,79,0,4
+6740,66,7,74
+6750,25,90,62
+6760,69,13,7
+6770,49,66,18
+6780,58,36,33
+6790,43,24,65
+6800,26,51,27
+6810,12,55,100
+6820,82,69,3
+6830,56,42,28
+6840,78,66,43
+6850,89,72,59
+6860,78,13,16
+6870,21,43,95
+6880,42,6,13
+6890,41,68,57
+6900,19,17,59
+6910,95,49,57
+6920,49,34,86
+6930,84,92,71
+6940,99,19,24
+6950,70,13,52
+6960,37,6,17
+6970,38,22,38
+6980,88,93,29
+6990,64,32,8`;
+        const routingCsv = `Time,Server-User1(Before),Server-User1(After),Server-User2(Before),Server-User2(After),Server-User3(Before),Server-User3(After),Server-User4(Before),Server-User4(After)\n0,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch4', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n10,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch4', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n20,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterB', 'Switch4', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n30,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterC', 'Switch14', 'Switch12', 'Switch11', 'Switch4', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'Switch11', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n40,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n50,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n60,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterB', 'Switch4', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n70,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n80,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n90,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterC', 'Switch14', 'Switch12', 'Switch11', 'Switch10', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n100,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterB', 'Switch4', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterB', 'Switch4', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n110,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterB', 'Switch4', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterB', 'Switch4', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n120,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterB', 'Switch4', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n130,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterC', 'Switch14', 'Switch12', 'Switch11', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"\n140,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterA', 'Switch8', 'Switch10', 'Switch11', 'Switch12', 'Switch14', 'Switch13', 'User4']"\n150,"['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'User1']","['Server', 'RouterA', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterB', 'Switch4', 'Switch8', 'Switch10', 'User2']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch12', 'User3']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']","['Server', 'RouterC', 'Switch14', 'Switch13', 'User4']"`;
+        const bandwidthLog = [
+            { Time: 0,  RouterA_status: "Underloaded", RouterB_status: "Underloaded", RouterC_status: "Underloaded", Changes: "None" },
+            { Time: 10, RouterA_status: "Underloaded", RouterB_status: "Underloaded", RouterC_status: "Moderate",    Changes: "None" },
+            { Time: 20, RouterA_status: "Underloaded", RouterB_status: "Underloaded", RouterC_status: "Congested",  Changes: "QoS adjustment: RouterC-Server (old=180.0 : new=216.0)" },
+            { Time: 30, RouterA_status: "Congested",   RouterB_status: "Moderate",    RouterC_status: "Underloaded", Changes: "QoS adjustment: RouterA-Server (old=180.0 : new=216.0)" },
+            { Time: 40, RouterA_status: "Moderate",    RouterB_status: "Congested",   RouterC_status: "Underloaded", Changes: "QoS adjustment: RouterB-Server (old=120.0 : new=144.0)" }]
+        const aqmData = [
+  { Time: 0,  A: { load: 1,  action: "Low load (1%): No drops" }, 
+              B: { load: 29, action: "Low load (29%): No drops" }, 
+              C: { load: 30, action: "Low load (30%): No drops" } },
+
+  { Time: 10, A: { load: 3,  action: "Low load (3%): No drops" }, 
+              B: { load: 27, action: "Low load (27%): No drops" }, 
+              C: { load: 68, action: "Moderate load (68%): Random early drop/mark" } },
+
+  { Time: 20, A: { load: 35, action: "Low load (35%): No drops" }, 
+              B: { load: 38, action: "Low load (38%): No drops" }, 
+              C: { load: 90, action: "Heavy congestion (90%): Aggressive early drop" } },
+
+  { Time: 30, A: { load: 97, action: "Heavy congestion (97%): Aggressive early drop" }, 
+              B: { load: 66, action: "Moderate load (66%): Random early drop/mark" }, 
+              C: { load: 3,  action: "Low load (3%): No drops" } },
+
+  { Time: 40, A: { load: 45, action: "Low load (45%): No drops" }, 
+              B: { load: 94, action: "Heavy congestion (94%): Aggressive early drop" }, 
+              C: { load: 9,  action: "Low load (9%): No drops" } },
+];
+// --- Congestion Control (End-to-End) Data ---
+const congestionControlData = [
+  {Time:0, WorstRouter:"RouterC", WorstLoad:30, Users:[
+    {Rate:1100, Action:"Low load at RouterC (30%) : 1000.0 : 1100.0"},
+    {Rate:1100, Action:"Low load at RouterC (30%) : 1000.0 : 1100.0"},
+    {Rate:1100, Action:"Low load at RouterC (30%) : 1000.0 : 1100.0"},
+    {Rate:1100, Action:"Low load at RouterC (30%) : 1000.0 : 1100.0"}
+  ]},
+  {Time:10, WorstRouter:"RouterC", WorstLoad:68, Users:[
+    {Rate:1150, Action:"Moderate load at RouterC (68%) : 1100.0 : 1150.0"},
+    {Rate:1150, Action:"Moderate load at RouterC (68%) : 1100.0 : 1150.0"},
+    {Rate:1150, Action:"Moderate load at RouterC (68%) : 1100.0 : 1150.0"},
+    {Rate:1150, Action:"Moderate load at RouterC (68%) : 1100.0 : 1150.0"}
+  ]},
+  {Time:20, WorstRouter:"RouterC", WorstLoad:90, Users:[
+    {Rate:575, Action:"High congestion at RouterC (90%) : 1150.0 : 575.0"},
+    {Rate:575, Action:"High congestion at RouterC (90%) : 1150.0 : 575.0"},
+    {Rate:575, Action:"High congestion at RouterC (90%) : 1150.0 : 575.0"},
+    {Rate:575, Action:"High congestion at RouterC (90%) : 1150.0 : 575.0"}
+  ]},
+  // 👉 continue filling with your raw dataset...
+];
+
+// helper: classify congestion
+function classifyCongestion(load) {
+  if (load < 40) return {status:"Low Load", cls:"low"};
+  if (load < 75) return {status:"Moderate Load", cls:"moderate"};
+  return {status:"High Congestion", cls:"high"};
+}
+
+// update congestion control panel
+function updateCongestionPanel(step) {
+  const d = congestionControlData[step];
+  if (!d) return;
+
+  document.getElementById("ccTime").textContent = d.Time;
+  document.getElementById("ccRouter").textContent = d.WorstRouter;
+  document.getElementById("ccLoad").textContent = d.WorstLoad;
+
+  const c = classifyCongestion(d.WorstLoad);
+  const statusEl = document.getElementById("ccStatus");
+  statusEl.textContent = c.status;
+  statusEl.className = c.cls;
+
+  const ul = document.getElementById("ccUsers");
+  ul.innerHTML = "";
+  d.Users.forEach((u, i) => {
+    const li = document.createElement("li");
+    li.textContent = `User${i+1}: Rate=${u.Rate}, Action=${u.Action}`;
+    ul.appendChild(li);
+  });
+}
+// --- Buffer Management Data ---
+const bufferManagementData = [
+  {Time:0, A:{Load:1, Buffer:4, Action:"Low load (1%). Buffer drains 1. Buffer=4."}, 
+            B:{Load:29, Buffer:102, Action:"Low load (29%). Buffer drains 43. Buffer=102."}, 
+            C:{Load:30, Buffer:105, Action:"Low load (30%). Buffer drains 45. Buffer=105."}},
+  {Time:10, A:{Load:3, Buffer:14, Action:"Low load (3%). Buffer drains 5. Buffer=14."}, 
+             B:{Load:27, Buffer:166, Action:"Low load (27%). Buffer drains 71. Buffer=166."}, 
+             C:{Load:68, Buffer:377, Action:"Moderate load (68%). Priority drop 68 packets. Buffer=377."}},
+  {Time:20, A:{Load:35, Buffer:133, Action:"Low load (35%). Buffer drains 56. Buffer=133."}, 
+             B:{Load:38, Buffer:250, Action:"Low load (38%). Buffer drains 106. Buffer=250."}, 
+             C:{Load:90, Buffer:827, Action:"High congestion (90%). Buffer at 827/1000."}},
+  // 👉 continue filling rest of your dataset up to 200...
+];
+
+// classify helper
+function classifyLoad(load) {
+  if (load < 40) return {cls:"low"};
+  if (load < 75) return {cls:"moderate"};
+  return {cls:"high"};
+}
+
+// update buffer panel
+function updateBufferPanel(step) {
+  const d = bufferManagementData[step];
+  if (!d) return;
+
+  document.getElementById("bmTime").textContent = d.Time;
+
+  // Router A
+  document.getElementById("bmALoad").textContent = d.A.Load;
+  document.getElementById("bmABuffer").textContent = d.A.Buffer;
+  const aAction = document.getElementById("bmAAction");
+  aAction.textContent = d.A.Action;
+  aAction.className = classifyLoad(d.A.Load).cls;
+
+  // Router B
+  document.getElementById("bmBLoad").textContent = d.B.Load;
+  document.getElementById("bmBBuffer").textContent = d.B.Buffer;
+  const bAction = document.getElementById("bmBAction");
+  bAction.textContent = d.B.Action;
+  bAction.className = classifyLoad(d.B.Load).cls;
+
+  // Router C
+  document.getElementById("bmCLoad").textContent = d.C.Load;
+  document.getElementById("bmCBuffer").textContent = d.C.Buffer;
+  const cAction = document.getElementById("bmCAction");
+  cAction.textContent = d.C.Action;
+  cAction.className = classifyLoad(d.C.Load).cls;
+}
+
+        // === Leaky Bucket Data (sample, truncated from your dataset) ===
+const leakyBucketData = [
+  {time:0, A:{load:1,arr:1,leak:0,bucket:1,action:"queued",drop:0},
+           B:{load:29,arr:28,leak:0,bucket:28,action:"queued",drop:0},
+           C:{load:30,arr:30,leak:0,bucket:30,action:"queued",drop:0}},
+  {time:10, A:{load:3,arr:3,leak:1,bucket:3,action:"queued",drop:0},
+            B:{load:27,arr:27,leak:28,bucket:27,action:"queued",drop:0},
+            C:{load:68,arr:68,leak:30,bucket:68,action:"queued",drop:0}},
+  {time:20, A:{load:35,arr:35,leak:3,bucket:35,action:"queued",drop:0},
+            B:{load:38,arr:38,leak:27,bucket:38,action:"queued",drop:0},
+            C:{load:90,arr:90,leak:50,bucket:108,action:"queued",drop:0}},
+  {time:190, A:{load:84,arr:84,leak:50,bucket:200,action:"dropped 14",drop:14},
+             B:{load:8,arr:8,leak:50,bucket:36,action:"queued",drop:0},
+             C:{load:97,arr:97,leak:49,bucket:97,action:"queued",drop:0}},
+  {time:200, A:{load:2,arr:2,leak:50,bucket:152,action:"queued",drop:0},
+             B:{load:39,arr:39,leak:36,bucket:39,action:"queued",drop:0},
+             C:{load:0,arr:0,leak:50,bucket:47,action:"queued",drop:0}},
+  {time:210, A:{load:48,arr:48,leak:50,bucket:150,action:"queued",drop:0},
+             B:{load:11,arr:11,leak:39,bucket:11,action:"queued",drop:0},
+             C:{load:31,arr:31,leak:47,bucket:31,action:"queued",drop:0}}
+];
+
+// === Panel Update Logic ===
+let lbIndex = 0;
+function updateLeakyBucketPanel() {
+  const d = leakyBucketData[lbIndex];
+  document.getElementById("lbTime").textContent = d.time;
+
+  // Router A
+  document.getElementById("lbALoad").textContent = d.A.load;
+  document.getElementById("lbAArr").textContent = d.A.arr;
+  document.getElementById("lbALeak").textContent = d.A.leak;
+  document.getElementById("lbABucket").textContent = d.A.bucket;
+  document.getElementById("lbAAction").textContent = d.A.action;
+  document.getElementById("lbADrop").textContent = d.A.drop;
+
+  // Router B
+  document.getElementById("lbBLoad").textContent = d.B.load;
+  document.getElementById("lbBArr").textContent = d.B.arr;
+  document.getElementById("lbBLeak").textContent = d.B.leak;
+  document.getElementById("lbBBucket").textContent = d.B.bucket;
+  document.getElementById("lbBAction").textContent = d.B.action;
+  document.getElementById("lbBDrop").textContent = d.B.drop;
+
+  // Router C
+  document.getElementById("lbCLoad").textContent = d.C.load;
+  document.getElementById("lbCArr").textContent = d.C.arr;
+  document.getElementById("lbCLeak").textContent = d.C.leak;
+  document.getElementById("lbCBucket").textContent = d.C.bucket;
+  document.getElementById("lbCAction").textContent = d.C.action;
+  document.getElementById("lbCDrop").textContent = d.C.drop;
+
+  // cycle
+  lbIndex = (lbIndex + 1) % leakyBucketData.length;
+}
+
+// start
+updateLeakyBucketPanel();
+setInterval(updateLeakyBucketPanel, 10000);
+
+
+        // --- DATA PARSING ---
+        const links = Papa.parse(csvData.trim(), { header: true }).data.map(row => ({ source: row.Source, target: row.Target, weight: +row.Weight }));
+        let congestionRows = Papa.parse(congestionCsv.trim(), { header: true, dynamicTyping: true }).data;
+        let routingRows = Papa.parse(routingCsv.trim(), { header: true, dynamicTyping: true }).data;
+        let rowIndex = 0;
+        let routerStatuses = {}; // Global state for router status
+        
+        // --- D3 & SVG SETUP ---
+        const nodeSet = new Set();
+        links.forEach(l => { nodeSet.add(l.source); nodeSet.add(l.target); });
+        const rawNodes = Array.from(nodeSet);
+
+        const colorScale = {
+            Server: "#0041C2", RouterNormal: "#10b981", RouterModerate: "#f59e0b",
+            RouterCongested: "#ef4444", Switch: "#2563eb", User: "#a78bfa", Default: "#6b7280"
+        };
+        const getNodeColor = (id, status = 'low') => {
+            if (id.includes("Server")) return colorScale.Server;
+            if (id.includes("Router")) {
+                if (status === 'high') return colorScale.RouterCongested;
+                if (status === 'moderate') return colorScale.RouterModerate;
+                return colorScale.RouterNormal;
+            }
+            if (id.includes("Switch")) return colorScale.Switch;
+            if (id.includes("User")) return colorScale.User;
+            return colorScale.Default;
+        };
+        const getNodeSize = id => {
+            if (id.includes("Server")) return 22; 
+            if (id.includes("Router")) return 22;
+            if (id.includes("Switch")) return 24; 
+            if (id.includes("User")) return 22;
+            return 10;
+        };
+
+        const nodes = rawNodes.map(id => ({ id, color: getNodeColor(id), size: getNodeSize(id), x: 0, y: 0, fx: null, fy: null }));
+        const nodeMap = new Map(nodes.map(node => [node.id, node]));
+
+        const svg = d3.select("#graph");
+        const container = document.getElementById('graph-container');
+        let width = container.clientWidth;
+        let height = container.clientHeight;
+
+        // Add a glow filter definition
+        const defs = svg.append("defs");
+        const filter = defs.append("filter").attr("id", "glow");
+        filter.append("feGaussianBlur").attr("stdDeviation", "3.5").attr("result", "coloredBlur");
+        const feMerge = filter.append("feMerge");
+        feMerge.append("feMergeNode").attr("in", "coloredBlur");
+        feMerge.append("feMergeNode").attr("in", "SourceGraphic");
+
+        const linkG = svg.append("g");
+        const nodeG = svg.append("g");
+        const labelG = svg.append("g");
+        const packetG = svg.append("g"); // Group for packets
+        
+        function applyLayout() {
+            width = container.clientWidth; 
+            height = container.clientHeight;
+            svg.attr("width", width).attr("height", height);
+            
+            const layerY = { 
+                server: height*0.12, 
+                routers: height*0.28, 
+                switches_up: height*0.46, 
+                switches_down: height*0.62, 
+                users: height*0.86 
+            };
+            
+            const servers = nodes.filter(n=>n.id.includes("Server")); 
+            const routers = nodes.filter(n=>n.id.includes("Router")); 
+            const users = nodes.filter(n=>n.id.includes("User"));
+            const switches = nodes.filter(n=>n.id.includes("Switch")); 
+            const half = Math.ceil(switches.length / 2);
+            const switchesUp = switches.slice(0, half); 
+            const switchesDown = switches.slice(half);
+            
+            const spaceAcross = (list, y) => {
+                const margin = 60; 
+                const usable = Math.max(200, width - margin * 2); 
+                const count = list.length || 1;
+                return list.map((n, i) => ({ id: n.id, x: margin + (i + 0.5) * (usable / count), y }));
+            };
+            
+            const positions = [
+                ...spaceAcross(servers, layerY.server), 
+                ...spaceAcross(routers, layerY.routers), 
+                ...spaceAcross(switchesUp, layerY.switches_up), 
+                ...spaceAcross(switchesDown, layerY.switches_down), 
+                ...spaceAcross(users, layerY.users)
+            ];
+            
+            const posMap = {}; 
+            positions.forEach(p => posMap[p.id] = p);
+            nodes.forEach(n => { 
+                const p = posMap[n.id] || { x: width/2, y: height/2 }; 
+                n.x = p.x; n.y = p.y; n.fx = p.x; n.fy = p.y; 
+            });
+        }
+        applyLayout();
+
+        const linkSel = linkG.selectAll("line.link").data(links).enter()
+            .append("line").attr("class", "link").attr("id", d => `${d.source}-${d.target}`)
+            .attr("stroke-width", d => Math.max(1, d.weight/40));
+
+        const nodeSel = nodeG.selectAll("circle.node").data(nodes, d => d.id).enter()
+            .append("circle").attr("class", "node").attr("r", d => d.size).style("fill", d => d.color)
+            .style("stroke", "#fff").style("stroke-width", 1.5)
+            .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
+
+        const labelSel = labelG.selectAll("text.node-text").data(nodes, d => d.id).enter()
+            .append("text").attr("class", "node-text").text(d => d.id);
+        
+        function updatePositions() {
+            nodeSel.attr("cx", d => d.x).attr("cy", d => d.y);
+            labelSel.attr("x", d => d.x).attr("y", d => d.y + 4);
+            linkSel.attr("x1", d => nodeMap.get(d.source).x).attr("y1", d => nodeMap.get(d.source).y)
+                   .attr("x2", d => nodeMap.get(d.target).x).attr("y2", d => nodeMap.get(d.target).y);
+        }
+        updatePositions();
+        
+        function dragstarted(event,d){ d3.select(this).raise(); d.fx=d.x; d.fy=d.y; }
+        function dragged(event,d){ d.fx=event.x; d.fy=event.y; d.x=d.fx; d.y=d.fy; updatePositions(); }
+        function dragended(event,d){ d.x=d.fx; d.y=d.fy; updatePositions(); }
+
+        document.getElementById('node-count').textContent = nodes.length;
+        document.getElementById('link-count').textContent = links.length;
+        document.getElementById('avg-weight').textContent = Math.round(links.reduce((s,l)=>s+l.weight,0)/links.length);
+
+        // --- DYNAMIC UI UPDATE LOGIC ---
+        
+        function getStatus(val) {
+            if (val < 30) return {text:"Normal", cls:"low"};
+            if (val < 70) return {text:"Moderate", cls:"moderate"};
+            return {text:"Congested", cls:"high"};
+        }
+        
+        function formatPath(pathString) {
+            try {
+                return JSON.parse(pathString.replace(/'/g, '"')).join(' → ');
+            } catch (e) { return "Invalid path data"; }
+        }
+
+        function updateCongestionPanelAndColors(congestionRow) {
+            ["A", "B", "C"].forEach(r => {
+                const routerId = `Router${r}`;
+                const val = congestionRow[routerId];
+                const status = getStatus(val);
+                routerStatuses[routerId] = status.text; // Update global status
+
+                const tr = document.getElementById(`row${r}`);
+                tr.querySelector(".val").textContent = `${val}%`;
+                const s = tr.querySelector(".status");
+                s.textContent = status.text;
+                s.className = `status ${status.cls}`;
+                // In your existing updateCongestionPanelAndColors function, 
+// add this line after the forEach loop:
+        // Add subtle background color to entire row
+        tr.className = `${status.cls}-bg`;
+            });
+
+            nodeSel.style("fill", d => getNodeColor(d.id, routerStatuses[d.id]));
+        }
+
+        function updateReroutingPanel(routingRow) {
+            const container = document.getElementById("rerouting-suggestions-container");
+            container.innerHTML = '<h3>📌 Rerouting Suggestions</h3>';
+            let suggestionsFound = false;
+            
+            for (let i = 1; i <= 4; i++) {
+                const user = `User${i}`;
+                const beforeKey = `Server-${user}(Before)`;
+                const afterKey = `Server-${user}(After)`;
+                if (routingRow[beforeKey] && routingRow[afterKey] && routingRow[beforeKey] !== routingRow[afterKey]) {
+                    suggestionsFound = true;
+                    container.innerHTML += `<p><strong class="user-tag">${user} Traffic</strong><strong>Before:</strong> ${formatPath(routingRow[beforeKey])}<br><strong>After (HACO):</strong> ${formatPath(routingRow[afterKey])}</p>`;
+                }
+            }
+            if (!suggestionsFound) {
+                container.innerHTML += '<p>No rerouting actions required at this time step.</p>';
+            }
+        }
+
+        function updateBandwidthAdjustmentPanel(timeStep) {
+            const container = document.getElementById("bandwidth-adjustment-container");
+            container.innerHTML = '<h3>📡 Bandwidth Adjustments</h3>';
+
+            // Find matching bandwidth entry for current time step
+            const bandwidthRow = bandwidthLog.find(row => row.Time === timeStep);
+            
+            if (bandwidthRow && bandwidthRow.Changes && bandwidthRow.Changes !== "None") {
+                const match = bandwidthRow.Changes.match(/Router(\w+)-Server.*old=(\d+\.?\d*)\s*:\s*new=(\d+\.?\d*)/);
+
+                if (match) {
+                    const router = match[1];
+                    const oldVal = parseFloat(match[2]);
+                    const newVal = parseFloat(match[3]);
+
+                    container.innerHTML += `
+                        <p>
+                          <strong>Router ${router}</strong> bandwidth raised<br>
+                          Old: ${oldVal} Mbps → New: ${newVal} Mbps
+                        </p>`;
+                }
+            } else {
+                container.innerHTML += `<p>No QoS adjustments this step ✅</p>`;
+            }
+        }
+        function updateAQM(rowIndex) {
+  const time = congestionRows[rowIndex].Time;
+  const step = aqmData.find(d => d.Time === time);
+  if (!step) return;
+
+  const rows = {
+    A: document.querySelector("#aqmRowA"),
+    B: document.querySelector("#aqmRowB"),
+    C: document.querySelector("#aqmRowC"),
+  };
+
+  ["A", "B", "C"].forEach(r => {
+    const load = step[r].load;
+    const action = step[r].action;
+
+    rows[r].children[1].textContent = load + "%";
+    rows[r].children[2].textContent = action;
+
+    // Reuse color coding
+    let cls = "low";
+    if (load >= 70) cls = "high";
+    else if (load >= 30) cls = "moderate";
+    rows[r].children[1].className = cls;
+    rows[r].children[2].className = cls;
+  });
+}
+
+
+
+        function updateSummaryPanel(congestionRow, routingRow) {
+            let summary = `Network status at <strong>${congestionRow.Time}s</strong>: `;
+            const congestedRouters = [];
+            const moderateRouters = [];
+
+            ["A", "B", "C"].forEach(r => {
+                const val = congestionRow[`Router${r}`];
+                if (val >= 70) congestedRouters.push(`Router${r} (${val}%)`);
+                else if (val >= 30) moderateRouters.push(`Router${r} (${val}%)`);
+            });
+
+            if (congestedRouters.length === 0 && moderateRouters.length === 0) {
+                summary += "All systems are operating normally. ";
+            } else {
+                if (congestedRouters.length > 0) summary += `Heavy congestion detected at <strong>${congestedRouters.join(', ')}</strong>. `;
+                if (moderateRouters.length > 0) summary += `Moderate traffic at <strong>${moderateRouters.join(', ')}</strong>. `;
+            }
+
+            const reroutedUsers = [];
+            for (let i = 1; i <= 4; i++) {
+                if (routingRow[`Server-User${i}(Before)`] !== routingRow[`Server-User${i}(After)`]) {
+                    reroutedUsers.push(`User${i}`);
+                }
+            }
+            if(reroutedUsers.length > 0) {
+                summary += `Rerouting algorithms have been activated for <strong>${reroutedUsers.join(', ')}</strong> to ensure QoS.`;
+            } else {
+                summary += `Traffic is stable with no rerouting actions needed.`
+            }
+            document.getElementById("summary-text").innerHTML = summary;
+        }
+
+        function animatePaths(routingRow) {
+            packetG.selectAll("*").remove(); // Clear old packets
+            
+            const pathsToAnimate = [];
+            for (let i=1; i<=4; i++) {
+                const user = `User${i}`;
+                const beforePath = routingRow[`Server-${user}(Before)`];
+                const afterPath = routingRow[`Server-${user}(After)`];
+                
+                if (beforePath) {
+                    pathsToAnimate.push({ type: 'Before', pathStr: beforePath, user: user });
+                }
+                
+                // Only animate "After" path if it's different from "Before"
+                if (afterPath && beforePath !== afterPath) {
+                    pathsToAnimate.push({ type: 'After', pathStr: afterPath, user: user });
+                }
+            }
+
+            pathsToAnimate.forEach((p, index) => {
+                if(!p.pathStr) return;
+                
+                let pathArr;
+                try {
+                    pathArr = JSON.parse(p.pathStr.replace(/'/g, '"'));
+                } catch (e) {
+                    console.error(`Failed to parse path for ${p.user}:`, p.pathStr);
+                    return;
+                }
+                
+                const startNode = nodeMap.get(pathArr[0]);
+                if (!startNode) {
+                    console.warn(`Start node not found: ${pathArr[0]}`);
+                    return;
+                }
+
+                // Calculate timing to spread across 10 seconds
+                const totalDuration = 10000; // 10 seconds total
+                const pathLength = pathArr.length - 1; // Number of hops
+                const stepDuration = pathLength > 0 ? totalDuration / pathLength : totalDuration;
+                
+                // Stagger start times to spread packets across the 10 seconds
+                const maxStartDelay = 2000; // First 2 seconds for staggered starts
+                const startDelay = (index * maxStartDelay) / pathsToAnimate.length;
+
+                setTimeout(() => {
+                    const packet = packetG.append("circle")
+                        .attr("class", `packet packet-${p.type.toLowerCase()}`)
+                        .attr("r", 4)
+                        .attr("cx", startNode.x)
+                        .attr("cy", startNode.y)
+                        .style("opacity", 0.8);
+                    
+                    movePacketAlongPath(packet, pathArr, 0, p.type, stepDuration, totalDuration - startDelay);
+                }, startDelay);
+            });
+        }
+
+        function movePacketAlongPath(packet, path, index, type, stepDuration, remainingTime) {
+            if (index >= path.length - 1) {
+                // Ensure packet fades out before next timestamp
+                const fadeTime = Math.min(300, remainingTime);
+                // Replace this section in your existing movePacketAlongPath function:
+            if (!link.empty()) {
+                link.classed("active-packet-path", true); // Add green dynamically
+            }
+            
+// And in the .on("end") callback, replace the link reset with:
+                if (!link.empty()) {
+                    link.classed("active-packet-path", false)
+                        .style("filter", null);
+                    
+                    if (!link.classed("unused-path")) {
+                        link.style("stroke", "#475569")
+                            .style("stroke-opacity", 0.6);
+                    }
+                }
+                packet.transition().duration(fadeTime).style("opacity", 0).remove();
+                return;
+            }
+
+            const sourceNodeId = path[index];
+            const targetNodeId = path[index+1];
+            const sourceNode = nodeMap.get(sourceNodeId);
+            const targetNode = nodeMap.get(targetNodeId);
+            
+            if (!sourceNode || !targetNode) {
+                console.warn(`Node not found: ${sourceNodeId} or ${targetNodeId}`);
+                packet.remove();
+                return;
+            }
+            
+            // Find the link element (could be source-target or target-source)
+            let link = d3.select(`#${sourceNodeId}-${targetNodeId}`);
+            if (link.empty()) link = d3.select(`#${targetNodeId}-${sourceNodeId}`);
+
+            // Set link style for animation
+            let linkColor = type === 'After' ? "#86efac" : "#fca5a5";
+            if (type === 'Before') {
+                const sourceStatus = routerStatuses[sourceNodeId];
+                const targetStatus = routerStatuses[targetNodeId];
+                if (sourceStatus === 'Congested' || targetStatus === 'Congested') {
+                    linkColor = colorScale.RouterCongested;
+                }
+            }
+            
+            if (!link.empty()) {
+                link.style("filter", "url(#glow)")
+                    .style("stroke", linkColor)
+                    .style("stroke-opacity", 1);
+            }
+            
+            // Calculate duration for this step, ensuring we don't exceed remaining time
+            const actualStepDuration = Math.min(stepDuration, remainingTime - 100); // Leave 100ms buffer
+            
+            packet.transition()
+                .duration(actualStepDuration)
+                .attr("cx", targetNode.x)
+                .attr("cy", targetNode.y)
+                .on("end", () => {
+                    // Reset link style after traversal
+                    if (!link.empty()) {
+                        link.style("filter", null)
+                            .style("stroke", "#4b5563")
+                            .style("stroke-opacity", 0.6);
+                    }
+                    movePacketAlongPath(packet, path, index + 1, type, stepDuration, remainingTime - actualStepDuration);
+                });
+        }
+// === Token Bucket Data ===
+const tokenBucketData = [
+  {time:0, A:{load:1,demand:1,tokens:199,action:"sent",drop:0},
+           B:{load:29,demand:28,tokens:172,action:"sent",drop:0},
+           C:{load:30,demand:30,tokens:170,action:"sent",drop:0}},
+  {time:10, A:{load:3,demand:3,tokens:197,action:"sent",drop:0},
+            B:{load:27,demand:27,tokens:173,action:"sent",drop:0},
+            C:{load:68,demand:68,tokens:132,action:"sent",drop:0}},
+  {time:20, A:{load:35,demand:35,tokens:165,action:"sent",drop:0},
+            B:{load:38,demand:38,tokens:162,action:"sent",drop:0},
+            C:{load:90,demand:90,tokens:92,action:"sent",drop:0}},
+  {time:30, A:{load:97,demand:97,tokens:103,action:"sent",drop:0},
+            B:{load:66,demand:66,tokens:134,action:"sent",drop:0},
+            C:{load:3,demand:3,tokens:139,action:"sent",drop:0}},
+  {time:40, A:{load:45,demand:45,tokens:108,action:"sent",drop:0},
+            B:{load:94,demand:94,tokens:90,action:"sent",drop:0},
+            C:{load:9,demand:9,tokens:180,action:"sent",drop:0}},
+  {time:50, A:{load:2,demand:2,tokens:156,action:"sent",drop:0},
+            B:{load:16,demand:16,tokens:124,action:"sent",drop:0},
+            C:{load:31,demand:31,tokens:169,action:"sent",drop:0}},
+  {time:60, A:{load:36,demand:36,tokens:164,action:"sent",drop:0},
+            B:{load:9,demand:9,tokens:165,action:"sent",drop:0},
+            C:{load:62,demand:62,tokens:138,action:"sent",drop:0}},
+  {time:70, A:{load:23,demand:23,tokens:177,action:"sent",drop:0},
+            B:{load:34,demand:34,tokens:166,action:"sent",drop:0},
+            C:{load:29,demand:28,tokens:160,action:"sent",drop:0}},
+  {time:80, A:{load:22,demand:22,tokens:178,action:"sent",drop:0},
+            B:{load:95,demand:95,tokens:105,action:"sent",drop:0},
+            C:{load:83,demand:83,tokens:117,action:"sent",drop:0}},
+  {time:90, A:{load:56,demand:56,tokens:144,action:"sent",drop:0},
+            B:{load:92,demand:92,tokens:63,action:"sent",drop:0},
+            C:{load:13,demand:13,tokens:154,action:"sent",drop:0}},
+  {time:100, A:{load:99,demand:99,tokens:95,action:"sent",drop:0},
+             B:{load:1,demand:1,tokens:112,action:"sent",drop:0},
+             C:{load:30,demand:30,tokens:170,action:"sent",drop:0}},
+  {time:110, A:{load:71,demand:71,tokens:74,action:"sent",drop:0},
+             B:{load:28,demand:28,tokens:134,action:"sent",drop:0},
+             C:{load:73,demand:73,tokens:127,action:"sent",drop:0}},
+  {time:120, A:{load:30,demand:30,tokens:94,action:"sent",drop:0},
+             B:{load:26,demand:26,tokens:158,action:"sent",drop:0},
+             C:{load:32,demand:32,tokens:145,action:"sent",drop:0}},
+  {time:130, A:{load:96,demand:96,tokens:48,action:"sent",drop:0},
+             B:{load:65,demand:65,tokens:135,action:"sent",drop:0},
+             C:{load:65,demand:65,tokens:130,action:"sent",drop:0}}
+];
+
+// === Panel Update Logic ===
+let tbIndex = 0;
+function updateTokenBucketPanel() {
+  const d = tokenBucketData[tbIndex];
+  document.getElementById("tbTime").textContent = d.time;
+
+  // Router A
+  document.getElementById("tbALoad").textContent = d.A.load;
+  document.getElementById("tbADemand").textContent = d.A.demand;
+  document.getElementById("tbATokens").textContent = d.A.tokens;
+  document.getElementById("tbAAction").textContent = d.A.action;
+  document.getElementById("tbADrop").textContent = d.A.drop;
+
+  // Router B
+  document.getElementById("tbBLoad").textContent = d.B.load;
+  document.getElementById("tbBDemand").textContent = d.B.demand;
+  document.getElementById("tbBTokens").textContent = d.B.tokens;
+  document.getElementById("tbBAction").textContent = d.B.action;
+  document.getElementById("tbBDrop").textContent = d.B.drop;
+
+  // Router C
+  document.getElementById("tbCLoad").textContent = d.C.load;
+  document.getElementById("tbCDemand").textContent = d.C.demand;
+  document.getElementById("tbCTokens").textContent = d.C.tokens;
+  document.getElementById("tbCAction").textContent = d.C.action;
+  document.getElementById("tbCDrop").textContent = d.C.drop;
+
+  // cycle
+  tbIndex = (tbIndex + 1) % tokenBucketData.length;
+}
+
+// start
+updateTokenBucketPanel();
+setInterval(updateTokenBucketPanel, 10000);
+  function markUnusedPaths(routingRow) {
+    linkSel.classed("unused-path", false);
+    
+    const allAfterPaths = [];
+    const allBeforePaths = [];
+    
+    for (let i = 1; i <= 4; i++) {
+        const afterPath = routingRow[`Server-User${i}(After)`];
+        const beforePath = routingRow[`Server-User${i}(Before)`];
+        
+        if (afterPath) {
+            try {
+                allAfterPaths.push(JSON.parse(afterPath.replace(/'/g, '"')));
+            } catch (e) {}
+        }
+        if (beforePath) {
+            try {
+                allBeforePaths.push(JSON.parse(beforePath.replace(/'/g, '"')));
+            } catch (e) {}
+        }
+    }
+    
+    const futureUseEdges = new Set();
+    allAfterPaths.forEach(path => {
+        for (let i = 0; i < path.length - 1; i++) {
+            futureUseEdges.add(`${path[i]}-${path[i+1]}`);
+            futureUseEdges.add(`${path[i+1]}-${path[i]}`);
+        }
+    });
+    
+    const currentUseEdges = new Set();
+    allBeforePaths.forEach(path => {
+        for (let i = 0; i < path.length - 1; i++) {
+            currentUseEdges.add(`${path[i]}-${path[i+1]}`);
+            currentUseEdges.add(`${path[i+1]}-${path[i]}`);
+        }
+    });
+    
+    linkSel.each(function(d) {
+        const linkId = d.source + "-" + d.target;
+        const reverseLinkId = d.target + "-" + d.source;
+        const isCurrentlyUsed = currentUseEdges.has(linkId) || currentUseEdges.has(reverseLinkId);
+        const willBeUsed = futureUseEdges.has(linkId) || futureUseEdges.has(reverseLinkId);
+        
+        if (isCurrentlyUsed && !willBeUsed) {
+            d3.select(this).classed("unused-path", true);
+        }
+    });
+}
+        // --- MAIN CONTROL LOOP ---
+        function updateAll() {
+            const congestionRow = congestionRows[rowIndex];
+            const routingRow = routingRows[rowIndex];
+            // Add this single line after updateCongestionPanelAndColors(congestionRow);
+markUnusedPaths(routingRow);
+            if (!congestionRow || !routingRow) {
+                console.warn(`Missing data at index ${rowIndex}`);
+                return;
+            }
+
+            console.log(`Updating to time step ${congestionRow.Time}`);
+            
+            document.getElementById("time-step-header").textContent = `⏱️ Time step ${congestionRow.Time} sec`;
+            
+            updateCongestionPanelAndColors(congestionRow);
+            updateReroutingPanel(routingRow);
+            updateBandwidthAdjustmentPanel(congestionRow.Time);
+            updateSummaryPanel(congestionRow, routingRow);
+            animatePaths(routingRow);
+            updateAQM(rowIndex);
+            updateCongestionPanel(rowIndex);
+            updateBufferPanel(rowIndex);
+
+
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            applyLayout();
+            updatePositions();
+        });
+
+        // Initialize
+        updateAll(); 
+        
+        // Set up the main animation loop
+        setInterval(() => {
+            rowIndex = (rowIndex + 1) % congestionRows.length;
+            updateAll();
+        }, 10000); // 10-second interval - each timestamp runs for 10 seconds
+
+    </script>
+</body>
+</html>

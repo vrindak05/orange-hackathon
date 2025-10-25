@@ -114,6 +114,3 @@ Bandwidth change: RouterA–RouterB (old=160 → new=192)
 * **Improved QoS:** bandwidth adjustments prevented bottlenecks.
 * **Adaptive performance:** HACO found alternative routes as congestion evolved over time.
 
-
-
-This project is released under the MIT License.
